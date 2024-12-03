@@ -1,0 +1,1 @@
+# Estat-stica-de-Classe-de-Textura-por-Pedologia-e-Geomorfologia
