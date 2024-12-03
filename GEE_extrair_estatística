@@ -1,0 +1,235 @@
+//No GEE: https://code.earthengine.google.com/?accept_repo=users%2Fwallacesilva%2Fmapbiomas-solos&scriptPath=users%2Fwallacesilva%2Fmapbiomas-solos%3ACOLECAO_01%2Fdevelopment%2Fgranulometry%2Ftmp_texture_pedo_geo_acp
+// Nome: tmp_texture_pedo_geo_acp
+
+
+// Importar as imagens de textura
+var soilTexture = ee.Image('projects/mapbiomas-workspace/SOLOS/PRODUTOS_C02/mapbiomas_soil_collection2_lv1_textural_groups-1') (Adapte para o seu arquivo)
+  .select('lv1_textural_groups_000_030cm');
+
+// Definir a paleta de cores para a legenda
+var palette_legenda = [
+  '#a83800', // 1 - Very clayey
+  '#aa8686', // 2 - Clay
+  '#b5d6ae', // 3 - Silty
+  '#fffe73', // 4 - Sandy
+  '#d7c5a5',  // 5 - Medium
+];
+
+// Adicionar a camada ao mapa
+Map.addLayer(soilTexture, {
+  bands: ['lv1_textural_groups_000_030cm'],
+  min: 1,
+  max: 5,
+  palette: palette_legenda // Usar a variável corretamente
+}, 'Soil Texture (0-30cm)');
+
+var pedologia = ee.Image('projects/mapbiomas-workspace/AUXILIAR/ANALISES/cat31_raster_Ped_IBGE_4_WGS84_com_IDclass');
+var geomorfologia = ee.Image('projects/mapbiomas-workspace/AUXILIAR/ANALISES/cat33_raster_Geom_IBGE_4_WGS84_com_IDclass');
+
+// Importar os shapefiles dos biomas
+var biomes = ee.FeatureCollection("projects/mapbiomas-workspace/AUXILIAR/biomas_IBGE_250mil");
+
+// Definir a escala para os cálculos de área
+var scale = 1000; // Resolução das imagens (em metros)
+
+// Atualizando as classes de solo conforme fornecido
+var textureClasses = ee.Dictionary.fromLists(
+  ['1', '2', '3', '4', '5'],
+  [ 
+    'Não Observado',
+    'Muito Argilosa',
+    'Argilosa',
+    'Siltosa',
+    'Arenosa',
+    'Média'
+  ]
+);
+
+// Atualizando as classes de geomorfologia conforme fornecido
+var geomorphologyClasses = ee.Dictionary.fromLists(
+  ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'],
+  [
+    'Resíduo',
+    'Chapadas',
+    'Corpo d\'água continental',
+    'Depressões',
+    'Ilhas Oceânicas',
+    'Patamares',
+    'Planaltos',
+    'Planícies',
+    'Serras',
+    'Tabuleiros'
+  ]
+);
+
+// Atualizando as classes de pedologia conforme fornecido
+var pedologyClasses = ee.Dictionary.fromLists(
+  ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16'],
+  [
+    'Resíduo',
+    'ARGISSOLO',
+    'CAMBISSOLO',
+    'CHERNOSSOLO',
+    'CORPO D\'ÁGUA CONTINENTAL',
+    'DUNAS',
+    'ESPODOSSOLO',
+    'GLEISSOLO',
+    'LATOSSOLO',
+    'LUVISSOLO',
+    'NEOSSOLO',
+    'NITOSSOLO',
+    'ORGANOSSOLO',
+    'OUTROS',
+    'PLANOSSOLO',
+    'PLINTOSSOLO',
+    'VERTISSOLO'
+  ]
+);
+
+// Função para calcular área e porcentagem por classe de geomorfologia
+function calculateAreaPercentageGeomorphology(textureImage, geomorphologyImage, region) {
+  var pixelArea = ee.Image.pixelArea().divide(1e4); // Converter m² para hectares
+  
+  // Criar uma combinação única de classes
+  var combined = textureImage.multiply(100).add(geomorphologyImage).rename('Class');
+  
+  // Adicionar a banda de área como primeira banda
+  var combinedWithArea = pixelArea.rename('Area').addBands(combined);
+
+  // Calcular a soma da área por classe
+  var areaByClass = combinedWithArea.reduceRegion({
+    reducer: ee.Reducer.sum().group({
+      groupField: 1, // A banda de agrupamento é a segunda banda
+      groupName: 'Class'
+    }),
+    geometry: region.geometry(),
+    scale: scale,
+    maxPixels: 1e13
+  });
+
+  // A variável classAreas está sendo gerada aqui
+  var classAreas = ee.List(areaByClass.get('groups'));
+
+  // Processar os resultados para extrair áreas e classes
+  var results = classAreas.map(function(feature) {
+    var data = ee.Dictionary(feature);
+    var classId = ee.Number(data.get('Class')).toInt();
+    var areaHa = ee.Number(data.get('sum')).max(0); // Área total em hectares
+
+    // Extrair as classes (Textura, Geomorfologia)
+    var textureClass = classId.divide(100).floor().format('%d');
+    var geomorphologyClass = classId.mod(100).format('%d');
+
+    // Traduzir classes para nomes
+    var textureName = textureClasses.get(textureClass);
+    var geomorphologyName = geomorphologyClasses.get(geomorphologyClass);
+
+    return ee.Feature(null, {
+      'Bioma': region.get('Bioma'),
+      'Texture_Class': textureName,
+      'Geomorphology_Class': geomorphologyName,
+      'Area_ha': areaHa
+    });
+  });
+
+  // Calcular a porcentagem em relação ao total
+  var totalArea = classAreas.map(function(feature) {
+    return ee.Number(ee.Dictionary(feature).get('sum'));
+  }).reduce(ee.Reducer.sum());
+
+  var featureCollection = ee.FeatureCollection(results).map(function(feature) {
+    var area = ee.Number(feature.get('Area_ha'));
+    var percentage = area.divide(totalArea).multiply(100);
+
+    return feature.set('Percentage', percentage);
+  });
+
+  return featureCollection;
+}
+
+// Função para calcular área e porcentagem por classe de pedologia
+function calculateAreaPercentagePedology(textureImage, pedologiaImage, region) {
+  var pixelArea = ee.Image.pixelArea().divide(1e4); // Converter m² para hectares
+  
+  // Criar uma combinação única de classes
+  var combined = textureImage.multiply(100).add(pedologiaImage).rename('Class');
+  
+  // Adicionar a banda de área como primeira banda
+  var combinedWithArea = pixelArea.rename('Area').addBands(combined);
+
+  // Calcular a soma da área por classe
+  var areaByClass = combinedWithArea.reduceRegion({
+    reducer: ee.Reducer.sum().group({
+      groupField: 1, // A banda de agrupamento é a segunda banda
+      groupName: 'Class'
+    }),
+    geometry: region.geometry(),
+    scale: scale,
+    maxPixels: 1e13
+  });
+
+  // A variável classAreas está sendo gerada aqui
+  var classAreas = ee.List(areaByClass.get('groups'));
+
+  // Processar os resultados para extrair áreas e classes
+  var results = classAreas.map(function(feature) {
+    var data = ee.Dictionary(feature);
+    var classId = ee.Number(data.get('Class')).toInt();
+    var areaHa = ee.Number(data.get('sum')).max(0); // Área total em hectares
+
+    // Extrair as classes (Textura, Pedologia)
+    var textureClass = classId.divide(100).floor().format('%d');
+    var pedologyClass = classId.mod(100).format('%d');
+
+    // Traduzir classes para nomes
+    var textureName = textureClasses.get(textureClass);
+    var pedologyName = pedologyClasses.get(pedologyClass);
+
+    return ee.Feature(null, {
+      'Bioma': region.get('Bioma'),
+      'Texture_Class': textureName,
+      'Pedology_Class': pedologyName,
+      'Area_ha': areaHa
+    });
+  });
+
+  // Calcular a porcentagem em relação ao total
+  var totalArea = classAreas.map(function(feature) {
+    return ee.Number(ee.Dictionary(feature).get('sum'));
+  }).reduce(ee.Reducer.sum());
+
+  var featureCollection = ee.FeatureCollection(results).map(function(feature) {
+    var area = ee.Number(feature.get('Area_ha'));
+    var percentage = area.divide(totalArea).multiply(100);
+
+    return feature.set('Percentage', percentage);
+  });
+
+  return featureCollection;
+}
+
+// Executar os cálculos para os biomas
+var allResultsGeomorphology = biomes.map(function(biome) {
+  return calculateAreaPercentageGeomorphology(soilTexture, geomorfologia, biome);
+}).flatten();
+
+var allResultsPedology = biomes.map(function(biome) {
+  return calculateAreaPercentagePedology(soilTexture, pedologia, biome);
+}).flatten();
+
+// Exibir os resultados no console
+print('Resultados Geomorfologia:', allResultsGeomorphology);
+print('Resultados Pedologia:', allResultsPedology);
+
+// Exportar as tabelas para o Google Drive
+Export.table.toDrive({
+  collection: allResultsGeomorphology,
+  description: 'Area_Percentage_Geomorphology',
+  fileFormat: 'CSV'
+});
+
+Export.table.toDrive({
+  collection: allResultsPedology,
+  description: 'Area_Percentage_Pedology',
+  fileFormat: 'CSV'
+});
