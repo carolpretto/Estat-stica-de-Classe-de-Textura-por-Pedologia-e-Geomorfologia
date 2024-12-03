@@ -1,0 +1,126 @@
+# Carregar pacotes necessários
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(tidyr)
+
+# Passo 1: Carregar os dados
+# Alterar o caminho do arquivo conforme necessário
+dados <- read.csv("C:/estatistica/Area_Percentage_Pedology.csv")
+
+# Passo 2: Visualizar a estrutura dos dados para garantir que foram carregados corretamente
+head(dados)
+str(dados)
+
+# Mapeamento de classes pedológicas em maiúsculas para o formato correto
+mapa_classes <- c(
+  'RESÍDUO' = 'Resíduo',
+  'ARGISSOLO' = 'Argissolo',
+  'CAMBISSOLO' = 'Cambissolo',
+  'CHERNOSSOLO' = 'Chernossolo',
+  'DUNAS' = 'Dunas',
+  'ESPODOSSOLO' = 'Espodossolo',
+  'GLEISSOLO' = 'Gleissolo',
+  'LATOSSOLO' = 'Latossolo',
+  'LUVISSOLO' = 'Luvissolo',
+  'NEOSSOLO' = 'Neossolo',
+  'NITOSSOLO' = 'Nitossolo',
+  'ORGANOSSOLO' = 'Organossolo',
+  'OUTROS' = 'Outros',
+  'PLANOSSOLO' = 'Planossolo',
+  'PLINTOSSOLO' = 'Plintossolo',
+  'VERTISSOLO' = 'Vertissolo'
+)
+
+# Alterando as classes pedológicas de acordo com o mapeamento
+dados_transformados <- dados %>%
+  filter(Pedology_Class != "CORPO D'ÁGUA CONTINENTAL") %>%
+  mutate(
+    Pedology_Class = recode(Pedology_Class, !!!mapa_classes)  # Usando recode para alterar as classes conforme o mapa
+  ) %>%
+  group_by(Bioma, Pedology_Class) %>%
+  mutate(
+    total_porcentagem = sum(Percentage),  # Somar a porcentagem dentro de cada grupo de bioma e pedologia
+    porcentagem_relativa = Percentage / total_porcentagem * 100  # Calcular a porcentagem relativa
+  ) %>%
+  ungroup()
+
+# Passo 3: Reordenar as classes pedológicas, colocando "Outros" por último
+dados_transformados$Pedology_Class <- factor(dados_transformados$Pedology_Class,
+                                             levels = c(
+                                               'Resíduo', 'Argissolo', 'Cambissolo', 'Chernossolo', 'Dunas',
+                                               'Espodossolo', 'Gleissolo', 'Latossolo', 'Luvissolo', 'Neossolo',
+                                               'Nitossolo', 'Organossolo', 'Planossolo', 'Plintossolo', 'Vertissolo',
+                                               'Outros')  # Colocando "Outros" como última classe
+)
+
+# Passo 3: Reordenar as classes de textura conforme a ordem fornecida
+dados_transformados$Texture_Class <- factor(dados_transformados$Texture_Class, 
+                                            levels = c('Não Observado', 'Muito Argilosa', 'Argilosa', 
+                                                       'Siltosa', 'Arenosa', 'Média'))
+
+# Definir as cores para as classes de textura
+cores_textura <- c(
+  "Não Observado" = "#000000",
+  "Muito Argilosa" = "#a83800",
+  "Argilosa" = "#aa8686",
+  "Siltosa" = "#35978f",
+  "Arenosa" = "#fffe73",
+  "Média" = "#d7c5a5"
+)
+
+# Passo 4: Gráficos para visualização
+
+# 4.1. Gráfico de barras empilhadas para mostrar a distribuição das classes de textura dentro de cada classe pedológica e bioma
+ggplot(dados_transformados, aes(x = Pedology_Class, y = porcentagem_relativa, fill = Texture_Class)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = cores_textura) +  # Definindo as cores para as classes de textura
+  facet_wrap(~ Bioma) +
+  theme_minimal() +
+  labs(
+    title = "Distribuição das Classes de Textura Dentro de Cada Classe Pedológica por Bioma",
+    x = "Classe Pedológica",
+    y = "Porcentagem Relativa (%)",
+    fill = "Classe de Textura"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid = element_blank()  # Remove as linhas de grade
+  )
+
+# 4.2. Gráfico de barras empilhadas (zoom em um bioma específico, por exemplo, 'Caatinga')
+dados_caatinga <- dados_transformados %>% filter(Bioma == "Caatinga")
+
+ggplot(dados_caatinga, aes(x = Pedology_Class, y = porcentagem_relativa, fill = Texture_Class)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = cores_textura) +  # Definindo as cores para as classes de textura
+  theme_minimal() +
+  labs(
+    title = "Distribuição das Classes de Textura Dentro de Cada Classe Pedológica no Bioma Caatinga",
+    x = "Classe Pedológica",
+    y = "Porcentagem Relativa (%)",
+    fill = "Classe de Textura"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid = element_blank()  # Remove as linhas de grade
+  )
+
+# Passo 5: Estatísticas Descritivas para a porcentagem relativa
+estatisticas_porcentagem <- dados_transformados %>%
+  group_by(Bioma, Pedology_Class) %>%
+  summarise(
+    media_porcentagem = mean(porcentagem_relativa, na.rm = TRUE),
+    mediana_porcentagem = median(porcentagem_relativa, na.rm = TRUE),
+    desv_padrao_porcentagem = sd(porcentagem_relativa, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+print(estatisticas_porcentagem)
+
+# Passo 6: Salvar os gráficos gerados
+ggsave("grafico_barras_empilhadas_pedologia.png")
+ggsave("grafico_barras_empilhadas_caatinga_pedologia.png")
+
+# Passo 7: Salvar as estatísticas descritivas em um arquivo CSV
+write.csv(estatisticas_porcentagem, "estatisticas_porcentagem_relativa_pedologia.csv", row.names = FALSE)
