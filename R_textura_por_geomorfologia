@@ -1,0 +1,117 @@
+# Carregar pacotes necessários
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(tidyr)
+
+# Passo 1: Carregar os dados
+dados <- read.csv("C:/estatistica/Area_Percentage_Geomorphology.csv")  # Alterar o nome da planilha
+
+# Passo 2: Visualizar a estrutura dos dados para garantir que foram carregados corretamente
+head(dados)
+str(dados)
+
+# Mapeamento de classes de geomorfologia
+mapa_classes_geomorfologia <- c(
+  '0' = 'Resíduo',
+  '1' = 'Chapadas',
+  '2' = 'Corpo d\'água continental',  # Esta será excluída posteriormente
+  '3' = 'Depressões',
+  '4' = 'Ilhas Oceânicas',
+  '5' = 'Patamares',
+  '6' = 'Planaltos',
+  '7' = 'Planícies',
+  '8' = 'Serras',
+  '9' = 'Tabuleiros'
+)
+
+# Alterando as classes de geomorfologia de acordo com o mapeamento
+dados_transformados <- dados %>%
+  filter(Geomorphology_Class != "Corpo d'água continental") %>%
+  mutate(
+    Geomorphology_Class = recode(Geomorphology_Class, !!!mapa_classes_geomorfologia)  # Usando recode para alterar as classes conforme o mapa
+  ) %>%
+  group_by(Bioma, Geomorphology_Class) %>%
+  mutate(
+    total_porcentagem = sum(Percentage),  # Somar a porcentagem dentro de cada grupo de bioma e geomorfologia
+    porcentagem_relativa = Percentage / total_porcentagem * 100  # Calcular a porcentagem relativa
+  ) %>%
+  ungroup()
+
+# Definir as cores para as classes de textura
+cores_textura <- c(
+  "Muito Argilosa" = "#a83800",   # Classe 1
+  "Argilosa" = "#aa8686",         # Classe 2
+  "Siltosa" = "#35978f",          # Classe 3
+  "Arenosa" = "#fffe73",          # Classe 4
+  "Média" = "#d7c5a5"             # Classe 5
+)
+
+# Definir a ordem das classes de textura
+dados_transformados$Texture_Class <- factor(dados_transformados$Texture_Class, 
+                                            levels = c("Muito Argilosa", "Argilosa", "Siltosa", "Arenosa", "Média"))
+
+# Passo 4: Gráficos para visualização
+
+# 4.1. Gráfico de barras empilhadas para mostrar a distribuição das classes de textura dentro de cada classe de geomorfologia e bioma
+ggplot(dados_transformados, aes(x = Geomorphology_Class, y = porcentagem_relativa, fill = Texture_Class)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = cores_textura) +  # Definindo as cores para as classes de textura
+  facet_wrap(~ Bioma) +
+  theme_minimal() +
+  labs(
+    title = "Distribuição das Classes de Textura Dentro de Cada Classe de Geomorfologia por Bioma",
+    x = "Classe de Geomorfologia",
+    y = "Porcentagem Relativa (%)",
+    fill = "Classe de Textura"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.background = element_rect(fill = "transparent", colour = NA),  # Remove o fundo do painel
+    plot.background = element_rect(fill = "transparent", colour = NA),   # Remove o fundo geral do gráfico
+    panel.grid = element_blank(),  # Remove as linhas de grade
+    axis.ticks = element_blank(),  # Remove os ticks dos eixos
+    axis.line = element_blank()    # Remove as linhas dos eixos
+  )
+
+# 4.2. Gráfico de barras empilhadas (zoom em um bioma específico, por exemplo, 'Caatinga')
+dados_caatinga <- dados_transformados %>% filter(Bioma == "Caatinga")
+
+ggplot(dados_caatinga, aes(x = Geomorphology_Class, y = porcentagem_relativa, fill = Texture_Class)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = cores_textura) +  # Definindo as cores para as classes de textura
+  theme_minimal() +
+  labs(
+    title = "Distribuição das Classes de Textura Dentro de Cada Classe de Geomorfologia no Bioma Caatinga",
+    x = "Classe de Geomorfologia",
+    y = "Porcentagem Relativa (%)",
+    fill = "Classe de Textura"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.background = element_rect(fill = "transparent", colour = NA),  # Remove o fundo do painel
+    plot.background = element_rect(fill = "transparent", colour = NA),   # Remove o fundo geral do gráfico
+    panel.grid = element_blank(),  # Remove as linhas de grade
+    axis.ticks = element_blank(),  # Remove os ticks dos eixos
+    axis.line = element_blank()    # Remove as linhas dos eixos
+  )
+
+# Passo 5: Estatísticas Descritivas para a porcentagem relativa
+estatisticas_porcentagem <- dados_transformados %>%
+  group_by(Bioma, Geomorphology_Class) %>%
+  summarise(
+    media_porcentagem = mean(porcentagem_relativa, na.rm = TRUE),
+    mediana_porcentagem = median(porcentagem_relativa, na.rm = TRUE),
+    desv_padrao_porcentagem = sd(porcentagem_relativa, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+print(estatisticas_porcentagem)
+
+# Passo 6: Salvar os gráficos gerados
+ggsave("grafico_barras_empilhadas_geomorfologia.png", bg = "transparent")
+ggsave("grafico_barras_empilhadas_caatinga_geomorfologia.png", bg = "transparent")
+
+# Passo 7: Salvar as estatísticas descritivas em um arquivo CSV
+write.csv(estatisticas_porcentagem, "estatisticas_porcentagem_relativa_geomorfologia.csv", row.names = FALSE)
+
